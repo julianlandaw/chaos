@@ -6,6 +6,7 @@
   const colors = { bg: "#202f29", grid: "#36443b", muted: "#8f9d8e", text: "#cbd3c6", amber: "#e8a65a", purple: "#bbabdb", green: "#bac9aa" };
   const mono = '"SFMono-Regular", Consolas, "Liberation Mono", monospace';
   let activeExperiment = "logistic";
+  const experimentExtensions = new Map();
   const logistic = { a: 3.7, x0: 0.2, iterations: 120, compare: false, view: "bifurcation", range: "focus", running: false, visible: 120, lastTick: 0 };
   const pendulum = { p: { m1: 1, m2: 1, l1: 1, l2: 1, g: 9.81 }, angle1: 120, angle2: -20, compare: true, trails: true, speed: 1, running: false, view: "motion", t: 0, accumulator: 0, trail: [], phase: [], sample: 0 };
   const canvases = new Map();
@@ -345,11 +346,17 @@
   }
 
   function selectExperiment(experiment) {
+    for (const [name, extension] of experimentExtensions) if (name !== experiment) extension.onDeactivate?.();
     activeExperiment = experiment;
     stopLogistic(); pendulum.running = false; updatePendulumPlayback();
-    all("[data-experiment]").forEach(button => { const selected = button.dataset.experiment === experiment; button.classList.toggle("active", selected); button.setAttribute("aria-selected", selected); button.tabIndex = selected ? 0 : -1; });
-    $("logistic-panel").hidden = experiment !== "logistic"; $("pendulum-panel").hidden = experiment !== "pendulum";
-    if (experiment === "logistic") drawLogistic(); else drawPendulum();
+    all("[data-experiment]").forEach(button => {
+      const selected = button.dataset.experiment === experiment;
+      button.classList.toggle("active", selected); button.setAttribute("aria-selected", selected); button.tabIndex = selected ? 0 : -1;
+      $(button.getAttribute("aria-controls")).hidden = !selected;
+    });
+    if (experiment === "logistic") drawLogistic();
+    else if (experiment === "pendulum") drawPendulum();
+    else experimentExtensions.get(experiment)?.onSelect();
   }
 
   // Roving keyboard focus keeps the tab controls usable without a pointer.
@@ -363,6 +370,14 @@
       buttons[next].click(); buttons[next].focus();
     });
   }
+
+  window.ChaosLab = {
+    registerExperiment(name, extension) { experimentExtensions.set(name, extension); },
+    selectExperiment,
+    get activeExperiment() { return activeExperiment; },
+    plot: { setupCanvas, plotArea, axes, line, dot, text, colors },
+    paintRange, bindTabKeys,
+  };
 
   all("[data-experiment]").forEach(button => button.addEventListener("click", () => selectExperiment(button.dataset.experiment)));
   all("[data-logistic-view]").forEach(button => button.addEventListener("click", () => setLogisticView(button.dataset.logisticView)));
@@ -446,7 +461,7 @@
     canvas.toBlob(blob => {
       if (!blob) return;
       const url = URL.createObjectURL(blob), link = document.createElement("a");
-      link.href = url; link.download = `chaos-lab-${button.dataset.canvas === "logistic-canvas" ? logistic.view : `pendulum-${pendulum.view}`}.png`;
+      link.href = url; link.download = `chaos-lab-${button.dataset.filename || (button.dataset.canvas === "logistic-canvas" ? logistic.view : `pendulum-${pendulum.view}`)}.png`;
       document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     }, "image/png");
   }));

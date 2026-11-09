@@ -6,6 +6,7 @@
 <style>body{font:14px system-ui;margin:24px;background:#f6f5ef;color:#28332d;padding-right:75%}h1{font-size:24px}li{padding:4px 0}.pass{color:#27733e}.fail{color:#b1402e}iframe{position:fixed;left:27%;top:0;width:1280px;height:100vh;border:1px solid #ccc;max-width:73%}pre{white-space:pre-wrap}</style>
 <h1>Chaos Lab browser checks</h1><p id="status">Running numerical and interaction checks…</p><ol id="results"></ol>
 <iframe id="lab" title="Chaos Lab under test" src="../docs/index.html"></iframe>
+<script src="fixtures/lr1-reference.js"></script>
 <script>
 "use strict";
 const results = document.getElementById("results");
@@ -18,13 +19,17 @@ async function test(name, run) {
   catch (error) { item.className = "fail"; item.textContent = `FAIL: ${name} — ${error.message}`; failed++; }
   results.append(item);
 }
-document.getElementById("lab").addEventListener("load", async () => {
+async function runChecks() {
   const frame = document.getElementById("lab"), win = frame.contentWindow, doc = frame.contentDocument;
   const $ = id => doc.getElementById(id), M = win.ChaosMath;
   const errors = [];
   win.addEventListener("error", event => errors.push(event.message));
   win.addEventListener("unhandledrejection", event => errors.push(String(event.reason)));
   const click = selector => doc.querySelector(selector).click();
+  async function until(condition, timeout = 60000) {
+    const started = performance.now();
+    while (!condition()) { if (performance.now() - started > timeout) throw new Error("Timed out waiting for simulation"); await wait(40); }
+  }
   function input(id, value, type = "input") { $(id).value = value; $(id).dispatchEvent(new win.Event(type, { bubbles: true })); }
   const p = { m1: 1, m2: 1, l1: 1, l2: 1, g: 9.81 };
   const initial = [120 * Math.PI / 180, 0, -20 * Math.PI / 180, 0];
@@ -163,11 +168,128 @@ document.getElementById("lab").addEventListener("load", async () => {
     assert($("growth").value === "3.7" && $("initial").value === "0.2" && $("iterations").value === "120" && !$("logistic-compare").checked, "Defaults were not restored");
     assert(doc.querySelector('[data-logistic-view="bifurcation"]').getAttribute("aria-selected") === "true", "Reset did not restore bifurcation view");
   });
+  const Cardiac = win.CardiacSimulation;
+  const cardiacResults = {};
+  await test("Original LR1 model handles its removable voltage singularities", () => {
+    assert(doc.body.dataset.cardiacReady === "true", "Cardiac lab did not initialize");
+    for (const v of [-47.13, -77]) {
+      const cell = new win.LR1CellIto(); cell.v = v; cell.stepdt(0);
+      assert([cell.v, cell.m, cell.xr, cell.cai].every(Number.isFinite), `Nonfinite state at ${v} mV`);
+    }
+  });
+  await test("Cardiac parameter validation rejects unsupported pacing and currents", () => {
+    for (const invalid of [{ pcl: 99 }, { pcl: 378.5 }, { beats: 101 }, { tauXfac: 0 }, { icalfac: NaN }]) {
+      let rejected = false;
+      try { Cardiac.validate({ ...Cardiac.PRESETS.chaos, ...invalid }); } catch (_) { rejected = true; }
+      assert(rejected, `Invalid parameters accepted: ${JSON.stringify(invalid)}`);
+    }
+  });
+  for (const preset of ["regular", "chaos", "eads"]) await test(`Cardiac ${preset} preset matches original simulator reference`, async () => {
+    const result = await Cardiac.run(Cardiac.PRESETS[preset]); cardiacResults[preset] = result;
+    const reference = LR1_REFERENCE[preset];
+    for (const key of ["apds", "xsInit", "eadCounts", "stimulusTimes"]) {
+      assert(result[key].length === reference[key].length, `${key} count differs`);
+      const tolerance = key === "xsInit" ? 1e-8 : .011;
+      result[key].forEach((value, i) => assert(Math.abs(value - reference[key][i]) <= tolerance, `${key}[${i}] differs from original`));
+    }
+    assert(result.vs.length === result.ts.length && result.xs.length === result.ts.length && result.ts.length <= 30002, "Invalid sampled trace sizes");
+    assert(result.vs.every(Number.isFinite) && result.xs.every(Number.isFinite), "Nonfinite plot data");
+    assert(result.stimulusTimes.length === result.inputs.beats, "Incorrect stimulus count");
+    result.stimulusTimes.slice(1).forEach((time, i) => assert(Math.abs(time - result.stimulusTimes[i] - result.inputs.pcl) < 1e-8, "Pacing clock drift"));
+    if (preset === "regular") assert(result.metrics.maxAPD - result.metrics.minAPD < .02 && result.metrics.totalEADs === 0, "Regular rhythm did not settle");
+    if (preset === "chaos") assert(result.metrics.maxAPD - result.metrics.minAPD > 200 && new Set(result.apds.map(x => x.toFixed(1))).size > 10, "Chaos preset lost its varied APDs");
+    if (preset === "eads") assert(result.metrics.totalEADs >= 1, "EAD preset lost its secondary voltage rise");
+  });
+  await test("Cooperative cardiac calculation can be aborted without blocking the page", async () => {
+    const controller = new win.AbortController(); let timerFired = false;
+    const promise = Cardiac.run(Cardiac.PRESETS.chaos, { signal: controller.signal });
+    setTimeout(() => { timerFired = true; controller.abort(); }, 15);
+    let aborted = false;
+    try { await promise; } catch (error) { aborted = error.name === "AbortError"; }
+    assert(timerFired && aborted, "Cooperative run could not be canceled");
+  });
+  await test("Cardiac tab computes the original chaos preset and selects the appropriate engine", async () => {
+    $("cardiac-tab").click();
+    assert($("pendulum-panel").hidden && $("logistic-panel").hidden && !$("cardiac-panel").hidden, "Three-way panel switching failed");
+    await until(() => $("cardiac-panel").dataset.state !== "running");
+    assert($("cardiac-panel").dataset.state === "complete", $("cardiac-status").textContent);
+    assert($("cardiac-count").textContent === "50 / 50", "UI did not finish the chaos preset");
+    assert($("cardiac-panel").dataset.engine === (win.location.protocol === "file:" ? "cooperative" : "worker"), "Unexpected cardiac compute engine");
+  });
+  await test("All four cardiac plots render data and support keyboard navigation", async () => {
+    for (const view of ["voltage", "apd", "return", "memory"]) {
+      click(`[data-cardiac-view="${view}"]`); await wait(30);
+      const canvas = $("cardiac-canvas"), data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+      let amber = 0;
+      for (let i = 0; i < data.length; i += 4) if (data[i] > 120 && data[i] > data[i + 1] * 1.15) amber++;
+      assert(amber > 40, `${view} plot is empty`);
+      assert($("cardiac-plot-panel").getAttribute("aria-labelledby") === `cardiac-${view}-tab`, "Plot tab label mismatch");
+    }
+    $("cardiac-memory-tab").dispatchEvent(new win.KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+    assert($("cardiac-voltage-tab").getAttribute("aria-selected") === "true", "Cardiac tab keyboard navigation failed");
+    input("cardiac-window", "all", "change");
+  });
+  await test("Changed cardiac controls mark the old run and exports preserve its original parameters", async () => {
+    input("cardiac-pcl", 400);
+    assert($("cardiac-panel").dataset.stale === "true" && $("cardiac-corner").textContent.includes("PREVIOUS RUN"), "Outdated plots are not labelled");
+    const originalClick = win.HTMLAnchorElement.prototype.click; const downloads = [];
+    win.HTMLAnchorElement.prototype.click = function() {
+      downloads.push({ name: this.download, href: this.href, content: this.download.endsWith(".csv") ? win.fetch(this.href).then(r => r.text()) : null });
+    };
+    try {
+      $("cardiac-csv").click(); click('[data-canvas="cardiac-canvas"]');
+      await until(() => downloads.length === 2, 3000);
+      const csv = await downloads.find(item => item.name.endsWith(".csv")).content;
+      const rows = csv.trim().split(/\r?\n/).map(row => row.split(","));
+      assert(rows.length === 51 && rows[0].includes("xr_at_upstroke"), "CSV omitted measurements");
+      assert(rows[1][rows[0].indexOf("pcl")] === "378", "CSV used edited controls instead of recorded parameters");
+      assert(downloads.some(item => item.name === "chaos-lab-cardiac-voltage.png"), "Cardiac PNG filename is wrong");
+    } finally { win.HTMLAnchorElement.prototype.click = originalClick; }
+  });
+  await test("Cardiac cancellation preserves completed data and rejects late results", async () => {
+    $("cardiac-run").click(); await wait(30); $("cardiac-run").click(); await wait(80);
+    assert($("cardiac-progress").hidden && $("cardiac-status").textContent.includes("canceled"), "Cancel did not stop the run");
+    assert($("cardiac-count").textContent === "50 / 50" && $("cardiac-panel").dataset.stale === "true", "Cancellation replaced the previous data");
+    $("cardiac-run").click(); $("logistic-tab").click(); await wait(80);
+    assert($("cardiac-progress").hidden && $("cardiac-status").textContent.includes("leaving"), "Hidden cardiac experiment kept computing");
+    click("[data-cardiac-note]");
+    assert(!$("cardiac-panel").hidden && $("cardiac-panel").dataset.state !== "running", "Field note restarted a canceled run unexpectedly");
+  });
+  await test("Cardiac presets apply all original parameters and EAD counts reach the UI", async () => {
+    click('[data-cardiac-preset="eads"]');
+    assert($("cardiac-pcl").value === "1575" && $("cardiac-tauXfac").value === "10" && $("cardiac-itofac").value === "0", "EAD preset parameters are wrong");
+    await until(() => $("cardiac-panel").dataset.state !== "running");
+    assert($("cardiac-panel").dataset.state === "complete" && Number($("cardiac-eads").textContent) >= 1, "EAD result did not reach UI");
+    $("cardiac-reset").click();
+    assert($("cardiac-pcl").value === "378" && $("cardiac-icalfac").value === "1.15" && $("cardiac-ikifac").value === "2.2" && $("cardiac-yshift").value === "8", "Reset did not restore the original chaos parameters");
+    $("cardiac-run").click();
+    input("cardiac-tauXfac", 7.1); input("cardiac-itofac", 2); input("cardiac-beats", 20);
+    assert($("cardiac-tauXfac-value").textContent === "7.1×" && $("cardiac-itofac-value").textContent === "2.00×" && $("cardiac-beats-value").textContent === "20", "Cardiac sliders are disconnected");
+    input("cardiac-icalfac", 9, "change"); $("cardiac-run").click();
+    assert($("cardiac-panel").dataset.state !== "running" && $("cardiac-status").textContent.includes("valid"), "Invalid current multiplier was accepted");
+    input("cardiac-icalfac", 1.15, "change");
+  });
+  await test("All three experiments fit phone widths and expanded cardiac controls", async () => {
+    for (const width of [320, 390]) {
+      frame.style.width = `${width}px`; await wait(70);
+      for (const name of ["logistic", "pendulum", "cardiac"]) {
+        $(`${name}-tab`).click(); await wait(40);
+        if (name === "cardiac") doc.querySelector(".cardiac-parameters").open = true;
+        assert(doc.documentElement.scrollWidth <= win.innerWidth + 1, `${name} overflows at ${width}px`);
+      }
+    }
+    click('a[href="#cardiac-model-notes"]');
+    assert($("cardiac-model-notes").querySelector("details").open, "Cardiac model notes did not open");
+    assert(doc.documentElement.scrollWidth <= win.innerWidth + 1, "Expanded model notes overflow the viewport");
+  });
   await test("No JavaScript errors during interaction", () => assert(errors.length === 0, errors.join("; ")));
   document.getElementById("status").textContent = `${failed ? "FAIL" : "PASS"}: ${passed} passed, ${failed} failed.`;
   document.body.dataset.result = failed ? "FAIL" : "PASS";
   document.body.dataset.passed = passed;
   document.body.dataset.failed = failed;
-});
+}
+const labFrame = document.getElementById("lab");
+if (labFrame.contentDocument?.body?.dataset.cardiacReady === "true") runChecks();
+else labFrame.addEventListener("load", runChecks, { once: true });
 </script>
 </html>

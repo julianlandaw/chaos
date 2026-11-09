@@ -2105,3 +2105,296 @@ summary::-webkit-details-marker {
     transition:none!important
   }
 }
+
+/* Experiment 03 uses the same workbench and plot language as the first two. */
+.cardiac-plot-tabs button {
+  padding:8px 11px;
+}
+
+.cardiac-stats {
+  grid-template-columns:1fr 1.25fr .8fr;
+}
+
+.cardiac-stats .stat strong {
+  font-size:15px;
+}
+
+.cardiac-run-info {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:14px;
+  margin-top:20px;
+  min-height:18px;
+}
+
+.cardiac-status {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  color:var(--muted);
+  font-size:10px;
+  line-height:1.6;
+}
+
+.cardiac-status .status-dot {
+  flex-shrink:0;
+}
+
+.cardiac-error .cardiac-status {
+  color:#a54432;
+}
+
+.cardiac-error .cardiac-status .status-dot {
+  background:#a54432;
+}
+
+#cardiac-csv {
+  white-space:nowrap;
+}
+
+.cardiac-progress {
+  appearance:none;
+  display:block;
+  width:100%;
+  height:3px;
+  border:0;
+  border-radius:3px;
+  background:var(--line);
+  margin-top:10px;
+  accent-color:var(--accent);
+}
+
+.cardiac-progress::-webkit-progress-bar {
+  background:var(--line);
+  border-radius:3px;
+}
+
+.cardiac-progress::-webkit-progress-value {
+  background:var(--accent);
+  border-radius:3px;
+}
+
+.cardiac-progress::-moz-progress-bar {
+  background:var(--accent);
+}
+
+.cardiac-provenance {
+  color:var(--muted);
+  font-size:9px;
+  line-height:1.9;
+  margin:18px 0 0;
+}
+
+.cardiac-provenance a {
+  color:var(--accent);
+}
+
+.cardiac-provenance span {
+  margin:0 6px;
+  color:#abb29f;
+}
+
+.cardiac-field-note {
+  display:grid;
+  grid-template-columns:170px minmax(0,1fr) auto;
+  align-items:start;
+  gap:25px;
+  padding:29px 0;
+  border-top:1px solid var(--line);
+  margin-top:30px;
+}
+
+.cardiac-field-note>.note-number {
+  padding-top:6px;
+}
+
+.cardiac-field-note h3 {
+  font-family:var(--serif);
+  font-size:24px;
+  font-weight:400;
+  margin:0 0 10px;
+}
+
+.cardiac-field-note p {
+  font-size:12px;
+  line-height:1.9;
+  color:var(--muted);
+  max-width:630px;
+  margin:0;
+}
+
+.cardiac-field-note .note-link {
+  margin:7px 0 0;
+}
+
+.cardiac-field-note+.model-notes {
+  margin-top:0;
+}
+
+.cardiac-model-notes {
+  margin-top:0;
+  border-top:0;
+  scroll-margin-top:20px;
+}
+
+.cardiac-model-notes:target details {
+  outline:1px solid var(--line);
+  outline-offset:8px;
+}
+
+@media(max-width:1150px) {
+  .experiment-hint {
+    display:none;
+  }
+
+  .cardiac-stats .stat strong {
+    font-size:13px;
+  }
+
+  .cardiac-field-note {
+    grid-template-columns:140px minmax(0,1fr);
+    gap:15px 22px;
+  }
+
+  .cardiac-field-note .note-link {
+    grid-column:2;
+    max-width:250px;
+  }
+}
+
+@media(max-width:850px) {
+  .cardiac-plot-tabs button {
+    padding:8px 7px;
+    font-size:9px;
+  }
+
+  .cardiac-stats {
+    grid-template-columns:1fr 1.2fr;
+  }
+
+  .cardiac-stats .stat:last-child strong {
+    display:inline;
+  }
+
+  .cardiac-run-info {
+    align-items:flex-start;
+  }
+
+  .cardiac-status {
+    font-size:9px;
+  }
+
+  #cardiac-csv {
+    font-size:9px;
+    margin-top:4px;
+  }
+
+  .cardiac-provenance span {
+    display:none;
+  }
+
+  .cardiac-provenance>a:last-child {
+    display:block;
+  }
+}
+
+@media(max-width:650px) {
+  .experiment-tabs {
+    display:grid;
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:12px;
+  }
+
+  .experiment-tab {
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:10px;
+    white-space:normal;
+    line-height:1.5;
+  }
+
+  .experiment-tab .tab-number {
+    margin:0;
+    flex-shrink:0;
+  }
+
+  .experiment-tab .tab-arrow {
+    display:none;
+  }
+
+  .cardiac-plot-tabs button {
+    padding:8px 9px;
+  }
+
+  .cardiac-stats {
+    grid-template-columns:1.05fr 1.4fr .75fr;
+  }
+
+  .cardiac-stats .stat {
+    padding:0 8px;
+  }
+
+  .cardiac-stats .stat-label {
+    font-size:5.8px;
+    letter-spacing:0;
+  }
+
+  .cardiac-stats .stat strong {
+    font-size:11px;
+  }
+
+  .cardiac-stats .stat:last-child strong {
+    display:block;
+  }
+
+  .cardiac-run-info {
+    margin-top:16px;
+    gap:8px;
+  }
+
+  .cardiac-status {
+    font-size:9px;
+  }
+
+  .cardiac-provenance {
+    font-size:9px;
+  }
+
+  .cardiac-parameters {
+    margin-top:18px;
+  }
+
+  .cardiac-field-note {
+    display:block;
+    margin-top:13px;
+    padding:25px 0;
+  }
+
+  .cardiac-field-note h3 {
+    margin-top:22px;
+    font-size:23px;
+  }
+
+  .cardiac-field-note .note-link {
+    max-width:none;
+    margin-top:18px;
+  }
+}
+
+@media(max-width:370px) {
+  .experiment-tabs {
+    gap:8px;
+  }
+
+  .experiment-tab {
+    font-size:9px;
+    gap:5px;
+  }
+
+  .cardiac-plot-tabs button {
+    padding:8px 6px;
+    font-size:8px;
+  }
+}
