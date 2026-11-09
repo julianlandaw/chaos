@@ -16,6 +16,11 @@
     input.style.setProperty("--fill", `${100 * (Number(input.value) - Number(input.min)) / (Number(input.max) - Number(input.min))}%`);
   }
 
+  function observeResize(element, callback) {
+    if (typeof window.ResizeObserver === "function") new window.ResizeObserver(callback).observe(element);
+    else window.addEventListener("resize", callback);
+  }
+
   function setupCanvas(id) {
     const canvas = $(id), rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
@@ -97,7 +102,10 @@
       for (let n = 0; n < 700; n++) x = M.logistic(logistic.a, x);
       for (let n = 0; n < 75; n++) { x = M.logistic(logistic.a, x); dot(ctx, selected, yMap(x), 1.7, "#f6dcb0"); }
       const labelX = Math.max(area.left + 35, Math.min(area.right - 35, selected));
-      ctx.fillStyle = "#edc28a"; ctx.beginPath(); ctx.roundRect(labelX - 34, area.top - 18, 68, 18, 3); ctx.fill();
+      ctx.fillStyle = "#edc28a"; ctx.beginPath();
+      if (typeof ctx.roundRect === "function") ctx.roundRect(labelX - 34, area.top - 18, 68, 18, 3);
+      else ctx.rect(labelX - 34, area.top - 18, 68, 18);
+      ctx.fill();
       text(ctx, `a = ${logistic.a.toFixed(3)}`, labelX, area.top - 9, colors.bg, 8, "center");
     }
   }
@@ -376,7 +384,7 @@
     selectExperiment,
     get activeExperiment() { return activeExperiment; },
     plot: { setupCanvas, plotArea, axes, line, dot, text, colors },
-    paintRange, bindTabKeys,
+    paintRange, bindTabKeys, observeResize,
   };
 
   all("[data-experiment]").forEach(button => button.addEventListener("click", () => selectExperiment(button.dataset.experiment)));
@@ -466,8 +474,8 @@
     }, "image/png");
   }));
 
-  new ResizeObserver(() => { if (activeExperiment === "logistic") requestLogisticDraw(); else drawPendulum(); }).observe($("logistic-canvas").parentElement);
-  new ResizeObserver(() => { if (activeExperiment === "pendulum") drawPendulum(); }).observe($("pendulum-canvas").parentElement);
+  observeResize($("logistic-canvas").parentElement, () => { if (activeExperiment === "logistic") requestLogisticDraw(); else drawPendulum(); });
+  observeResize($("pendulum-canvas").parentElement, () => { if (activeExperiment === "pendulum") drawPendulum(); });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { stopLogistic(); pendulum.running = false; updatePendulumPlayback(); pendulum.accumulator = 0; }
   });

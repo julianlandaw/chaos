@@ -1,5 +1,5 @@
 "use strict";
-importScripts("vendor/lr1-cell.js", "cardiac-simulation.js");
+importScripts("vendor/lr1-cell.js?v=20261109-2", "cardiac-simulation.js?v=20261109-2");
 self.onmessage = async ({ data }) => {
   if (data?.kind !== "run") return;
   try {

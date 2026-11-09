@@ -39,6 +39,11 @@ async function runChecks() {
   }
   await wait(100);
   await test("Page initializes without dependencies", () => assert(doc.body.dataset.ready === "true" && M, "Application did not initialize"));
+  await test("Page assets use a consistent version to bypass stale cached scripts", () => {
+    const assets = [...doc.querySelectorAll('script[src], link[rel="stylesheet"]')];
+    const versions = assets.map(asset => new URL(asset.src || asset.href).searchParams.get("v"));
+    assert(versions.every(Boolean) && new Set(versions).size === 1, "Unversioned or mixed-version page assets");
+  });
   if (!M) { document.body.dataset.result = "FAIL"; return; }
   await test("Known logistic orbit and state bounds", () => {
     assert(M.logistic(4, .5) === 1 && M.logistic(4, 1) === 0, "Exact orbit is incorrect");
@@ -281,6 +286,25 @@ async function runChecks() {
     click('a[href="#cardiac-model-notes"]');
     assert($("cardiac-model-notes").querySelector("details").open, "Cardiac model notes did not open");
     assert(doc.documentElement.scrollWidth <= win.innerWidth + 1, "Expanded model notes overflow the viewport");
+  });
+  await test("A missing core script shows a refresh message instead of crashing the cardiac lab", async () => {
+    const failureFrame = document.createElement("iframe"); failureFrame.hidden = true;
+    document.body.append(failureFrame);
+    try {
+      const failureDoc = failureFrame.contentDocument;
+      const cardiacScript = doc.querySelector('script[src*="cardiac-lab.js"]').src;
+      failureDoc.open();
+      failureDoc.write('<!doctype html><html><head></head><body>' + doc.body.innerHTML + '<script>window.loadErrors=[];window.addEventListener("error",function(event){window.loadErrors.push(event.message);});<\/script><script src="' + cardiacScript + '"><\/script></body></html>');
+      failureDoc.close();
+      await until(() => failureDoc.getElementById("cardiac-panel").dataset.state === "error", 3000);
+      assert(failureFrame.contentWindow.loadErrors.length === 0, "Missing core still produces an uncaught error");
+      assert(failureDoc.getElementById("cardiac-status").textContent.includes("Refresh"), "Missing core has no recovery instruction");
+      assert(failureDoc.getElementById("cardiac-run").disabled, "Broken controls are still enabled");
+      failureDoc.getElementById("logistic-tab").click();
+      assert(failureDoc.getElementById("cardiac-panel").hidden, "Error panel did not hide on navigation");
+      failureDoc.getElementById("cardiac-tab").click();
+      assert(!failureDoc.getElementById("cardiac-panel").hidden, "Recovery message is unreachable");
+    } finally { failureFrame.remove(); }
   });
   await test("No JavaScript errors during interaction", () => assert(errors.length === 0, errors.join("; ")));
   document.getElementById("status").textContent = `${failed ? "FAIL" : "PASS"}: ${passed} passed, ${failed} failed.`;

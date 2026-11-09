@@ -1,6 +1,27 @@
 "use strict";
 (() => {
   const Lab = window.ChaosLab, Model = window.CardiacSimulation;
+  if (!Lab || !Lab.plot || typeof Lab.registerExperiment !== "function" || !Model || typeof window.LR1CellIto !== "function") {
+    const panel = document.getElementById("cardiac-panel");
+    const message = "The cardiac experiment couldn’t load its files. Refresh the page to load the latest version.";
+    document.getElementById("cardiac-status").textContent = message;
+    document.getElementById("cardiac-insight").textContent = message;
+    panel.dataset.state = "error";
+    panel.classList.add("cardiac-error");
+    panel.querySelectorAll("button, input, select").forEach(control => { control.disabled = true; });
+    // Keep the error message reachable when the cached core predates this lab.
+    document.querySelectorAll("[data-experiment]").forEach(tab => tab.addEventListener("click", () => {
+      panel.hidden = tab.dataset.experiment !== "cardiac";
+      if (!Lab) document.querySelectorAll("[data-experiment]").forEach(button => {
+        const selected = button === tab;
+        button.classList.toggle("active", selected);
+        button.setAttribute("aria-selected", String(selected));
+        button.tabIndex = selected ? 0 : -1;
+        document.getElementById(button.getAttribute("aria-controls")).hidden = !selected;
+      });
+    }));
+    return;
+  }
   const $ = id => document.getElementById(id);
   const buttons = selector => [...document.querySelectorAll(selector)];
   const { setupCanvas, plotArea, axes, line, dot, text, colors } = Lab.plot;
@@ -66,7 +87,7 @@
     state.running = false; state.stale = false; state.result = result;
     $("cardiac-panel").dataset.state = "complete"; $("cardiac-panel").dataset.stale = "false";
     updateButton(); $("cardiac-csv").disabled = false;
-    status(`${result.metrics.deliveredStimuli} stimuli · ${result.apds.length} complete APDs · ${(result.ts.at(-1)).toFixed(1)} s recorded`);
+    status(`${result.metrics.deliveredStimuli} stimuli · ${result.apds.length} complete APDs · ${result.ts[result.ts.length - 1].toFixed(1)} s recorded`);
     $("cardiac-count").textContent = `${result.apds.length} / ${result.metrics.deliveredStimuli}`;
     $("cardiac-range").textContent = result.apds.length ? `${result.metrics.minAPD.toFixed(1)}–${result.metrics.maxAPD.toFixed(1)}` : "No complete APDs";
     $("cardiac-eads").textContent = result.metrics.totalEADs;
@@ -103,7 +124,7 @@
     updateButton(); status("Preparing the cell · 0%"); draw();
     if (location.protocol === "file:" || typeof Worker === "undefined") { runLocal(inputs, id); return; }
     try {
-      const worker = new Worker("js/cardiac-worker.js");
+      const worker = new Worker("js/cardiac-worker.js?v=20261109-2");
       state.worker = worker; $("cardiac-panel").dataset.engine = "worker";
       worker.onmessage = ({ data }) => {
         if (data.id !== id || id !== state.id) return;
@@ -121,7 +142,7 @@
 
   function drawVoltage(size, result) {
     const { ctx } = size, area = plotArea(size.w, size.h);
-    const end = result.ts.at(-1), start = state.window === "all" ? 0 : Math.max(0, end - 8 * result.inputs.pcl / 1000);
+    const end = result.ts[result.ts.length - 1], start = state.window === "all" ? 0 : Math.max(0, end - 8 * result.inputs.pcl / 1000);
     const xMap = t => area.left + (t - start) / (end - start || 1) * (area.right - area.left);
     const yMap = v => area.bottom - (v + 100) / 160 * (area.bottom - area.top);
     axes(size, area, ticks(start, end, size.w < 400 ? 3 : 4, 1), [-100, -60, -20, 20, 60], xMap, yMap, "Recorded time (s)", "Voltage (mV)");
@@ -233,7 +254,8 @@
   });
   Lab.bindTabKeys("[data-cardiac-view]");
   Lab.registerExperiment("cardiac", { onSelect() { draw(); if (!state.started) run(); }, onDeactivate() { if (state.running) cancel("Run canceled when leaving the experiment. Simulate to run it again."); } });
-  new ResizeObserver(draw).observe($("cardiac-canvas").parentElement);
+  if (typeof Lab.observeResize === "function") Lab.observeResize($("cardiac-canvas").parentElement, draw);
+  else window.addEventListener("resize", draw);
   syncControls(); setView("voltage");
   $("cardiac-panel").dataset.state = "ready";
   document.body.dataset.cardiacReady = "true";

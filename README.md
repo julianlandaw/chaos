@@ -10,6 +10,8 @@ python3 -m http.server 8000
 
 Then visit `http://localhost:8000/docs/`. Everything runs locally, including the plots. No installation, build step, or internet connection is required. For GitHub Pages, publish the `docs/` directory from the `main` branch.
 
+Scripts, styles, and cardiac worker dependencies share an explicit `?v=` release token so a newly deployed page does not reuse an older cached core script. When changing these assets for a release, update the token in `docs/index.html`, the worker URL in `docs/js/cardiac-lab.js`, and the imports in `docs/js/cardiac-worker.js`. After publishing an update, a hard refresh (`Ctrl+Shift+R` in Edge) also refreshes any cached HTML. The site falls back when `ResizeObserver`, `CanvasRenderingContext2D.roundRect`, or `Array.prototype.at` are unavailable. A missing cardiac dependency shows a refresh instruction instead of an uncaught startup error.
+
 ## Experiments
 
 - **Logistic map:** adjustable growth rate and starting population; clickable bifurcation diagram; time series and cobweb plots; nearby initial conditions; orbit animation, single steps, cycle detection, and a finite-time Lyapunov estimate.
