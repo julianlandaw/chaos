@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chaos Lab — browser checks</title>
+<style>body{font:14px system-ui;margin:24px;background:#f6f5ef;color:#28332d;padding-right:75%}h1{font-size:24px}li{padding:4px 0}.pass{color:#27733e}.fail{color:#b1402e}iframe{position:fixed;left:27%;top:0;width:1280px;height:100vh;border:1px solid #ccc;max-width:73%}pre{white-space:pre-wrap}</style>
+<h1>Chaos Lab browser checks</h1><p id="status">Running numerical and interaction checks…</p><ol id="results"></ol>
+<iframe id="lab" title="Chaos Lab under test" src="../docs/index.html"></iframe>
+<script>
+"use strict";
+const results = document.getElementById("results");
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+let passed = 0, failed = 0;
+async function test(name, run) {
+  const item = document.createElement("li");
+  try { await run(); item.className = "pass"; item.textContent = `PASS: ${name}`; passed++; }
+  catch (error) { item.className = "fail"; item.textContent = `FAIL: ${name} — ${error.message}`; failed++; }
+  results.append(item);
+}
+document.getElementById("lab").addEventListener("load", async () => {
+  const frame = document.getElementById("lab"), win = frame.contentWindow, doc = frame.contentDocument;
+  const $ = id => doc.getElementById(id), M = win.ChaosMath;
+  const errors = [];
+  win.addEventListener("error", event => errors.push(event.message));
+  win.addEventListener("unhandledrejection", event => errors.push(String(event.reason)));
+  const click = selector => doc.querySelector(selector).click();
+  function input(id, value, type = "input") { $(id).value = value; $(id).dispatchEvent(new win.Event(type, { bubbles: true })); }
+  const p = { m1: 1, m2: 1, l1: 1, l2: 1, g: 9.81 };
+  const initial = [120 * Math.PI / 180, 0, -20 * Math.PI / 180, 0];
+  function integrate(y, duration, dt, parameters = p, derivative = M.doubleDerivative) {
+    for (let n = 0; n < Math.round(duration / dt); n++) y = M.rk4(y, dt, derivative, parameters);
+    return y;
+  }
+  await wait(100);
+  await test("Page initializes without dependencies", () => assert(doc.body.dataset.ready === "true" && M, "Application did not initialize"));
+  if (!M) { document.body.dataset.result = "FAIL"; return; }
+  await test("Known logistic orbit and state bounds", () => {
+    assert(M.logistic(4, .5) === 1 && M.logistic(4, 1) === 0, "Exact orbit is incorrect");
+    for (let a = 0; a <= 4; a += .05) assert(M.orbit(a, .173, 1000).every(x => x >= 0 && x <= 1), "Orbit escaped [0,1]");
+  });
+  await test("Fixed point, period doubling, and chaotic Lyapunov estimate", () => {
+    assert(Math.abs(M.orbit(2.8, .2, 500).pop() - (1 - 1 / 2.8)) < 1e-12, "Wrong stable fixed point");
+    assert(M.analyzeLogistic(3.2, .2).period === 2, "Period 2 not detected");
+    assert(M.analyzeLogistic(3.5, .2).period === 4, "Period 4 not detected");
+    assert(Math.abs(M.analyzeLogistic(4, .123456789).lyapunov - Math.log(2)) < .02, "Expected lambda ≈ ln(2)");
+    assert(M.analyzeLogistic(4, .5).behavior === "Unstable orbit", "Exceptional unstable cycle mislabeled");
+    assert(M.analyzeLogistic(0, .2).lyapunov === -Infinity, "Zero derivative should give −infinity");
+  });
+  await test("Undriven pendulums remain at their equilibrium", () => {
+    assert(integrate([0, 0, 0, 0], 2, 1 / 240).every(x => x === 0), "Double pendulum left equilibrium");
+    assert(M.rk4([0, 0], 1 / 240, M.singleDerivative, p).every(x => x === 0), "Single pendulum left equilibrium");
+  });
+  await test("Single pendulum matches the small-amplitude analytical period", () => {
+    const period = 2 * Math.PI * Math.sqrt(p.l1 / p.g), result = integrate([.01, 0], period, 1 / 240, p, M.singleDerivative);
+    assert(Math.abs(result[0] - .01) < 1e-6 && Math.abs(result[1]) < .0002, `Wrong period: ${result}`);
+  });
+  await test("Coupled equations conserve energy with unequal masses and lengths", () => {
+    const parameters = { m1: 1.7, m2: .8, l1: .7, l2: 1.3, g: 9.81 }, y = [.9, -.8, -1.2, 1.9];
+    const f = M.doubleDerivative(y, parameters), e = 1e-6;
+    const gradientAlongFlow = (M.energy(y.map((v, i) => v + e * f[i]), parameters) - M.energy(y.map((v, i) => v - e * f[i]), parameters)) / (2 * e);
+    assert(Math.abs(gradientAlongFlow) < 1e-6, `Nonzero energy derivative: ${gradientAlongFlow}`);
+  });
+  await test("RK4 converges at fourth order", () => {
+    const reference = integrate(initial, 1, 1 / 1920);
+    const error = dt => Math.hypot(...integrate(initial, 1, dt).map((v, i) => v - reference[i]));
+    const coarse = error(1 / 240), fine = error(1 / 480);
+    assert(coarse / fine > 10 && coarse / fine < 24, `Unexpected convergence ratio ${coarse / fine}`);
+  });
+  await test("High-energy trajectory has low numerical energy drift over 30 seconds", () => {
+    const e0 = M.energy(initial, p), y = integrate(initial, 30, 1 / 240);
+    const relative = Math.abs(M.energy(y, p) - e0) / e0;
+    assert(y.every(Number.isFinite) && relative < 1e-5, `Energy drift ${relative}`);
+  });
+  await test("Shortest rods and highest gravity remain numerically stable", () => {
+    const parameters = { ...p, l1: .3, l2: .3, g: 25 };
+    const e0 = M.energy(initial, parameters), y = integrate(initial, 10, 1 / 240, parameters);
+    assert(y.every(Number.isFinite) && Math.abs(M.energy(y, parameters) - e0) / e0 < .001, "Extreme supported parameters are unstable");
+  });
+  await test("Bifurcation canvas contains computed data", () => {
+    const canvas = $("logistic-canvas"), data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+    let amberPixels = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i] > 120 && data[i] > data[i + 1] * 1.15) amberPixels++;
+    assert(amberPixels > 500, "Bifurcation plot appears empty");
+  });
+  await test("Growth control updates analysis and presets select period-2", async () => {
+    input("growth", 2.8); await wait(40);
+    assert($("growth-value").textContent === "2.800" && $("logistic-behavior").textContent === "Steady state", "Growth control is disconnected");
+    click('[data-logistic-preset="3.2"]');
+    assert($("logistic-pattern").textContent === "2-point cycle", "Preset failed");
+    input("initial", .61); input("iterations", 80);
+    assert($("initial-value").textContent === "0.610" && $("iterations-value").textContent === "80 steps", "Orbit controls failed");
+  });
+  await test("Clicking the bifurcation chart selects a growth rate", async () => {
+    const canvas = $("logistic-canvas"), rect = canvas.getBoundingClientRect();
+    canvas.dispatchEvent(new win.PointerEvent("pointerdown", { pointerId: 1, pointerType: "touch", clientX: rect.left + rect.width * .7, clientY: rect.top + 150, bubbles: true }));
+    canvas.dispatchEvent(new win.PointerEvent("pointerup", { pointerId: 1, pointerType: "touch", clientX: rect.left + rect.width * .7, clientY: rect.top + 150, bubbles: true }));
+    await wait(40);
+    assert(Number($("growth").value) > 3.3 && Number($("growth").value) < 3.8, "Click did not set a");
+  });
+  await test("Nearby-start comparison opens the time series and orbit playback works", async () => {
+    $("logistic-compare").click(); await wait(40);
+    assert(doc.querySelector('[data-logistic-view="series"]').getAttribute("aria-selected") === "true", "Comparison did not select time series");
+    $("logistic-play").click(); await wait(200); $("logistic-play").click();
+    const n = Number($("orbit-progress").textContent.split("=")[1]);
+    assert(n > 0 && n < 80, `Orbit did not animate: n=${n}`);
+    $("logistic-step").click(); await wait(40);
+    assert(Number($("orbit-progress").textContent.split("=")[1]) === n + 1, "Step did not advance exactly once");
+    click('[data-logistic-view="cobweb"]'); await wait(40);
+    assert($("logistic-caption").textContent.includes("60 steps"), "Cobweb view failed");
+  });
+  await test("Arrow keys navigate experiment tabs", async () => {
+    $("logistic-tab").dispatchEvent(new win.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); await wait(40);
+    assert($("logistic-panel").hidden && !$("pendulum-panel").hidden && $("pendulum-tab").getAttribute("aria-selected") === "true", "Tab keyboard navigation failed");
+  });
+  await test("Pendulum plays, pauses, and advances one fixed frame", async () => {
+    $("pendulum-play").click(); await wait(250); $("pendulum-play").click();
+    const time = Number.parseFloat($("pendulum-time").textContent); assert(time > 0, "Pendulum did not advance");
+    await wait(80); assert(Number.parseFloat($("pendulum-time").textContent) === time, "Pause did not stop time");
+    $("pendulum-step").click();
+    assert(Math.abs(Number.parseFloat($("pendulum-time").textContent) - time - 1 / 60) < .011, "Step duration is wrong");
+    assert(Number.parseFloat($("pendulum-energy").textContent) < .01, "UI energy drift is too high");
+  });
+  await test("Pendulum parameters restart the model and reject invalid lengths", () => {
+    input("angle1", 45); assert($("angle1-value").textContent === "45°" && Number.parseFloat($("pendulum-time").textContent) === 0, "Angle control failed");
+    input("length1", 0, "change"); assert(Number($("length1").value) === 1, "Invalid zero length was accepted");
+    input("length1", 1.5, "change"); input("gravity", 1.62, "change");
+    assert(Number($("length1").value) === 1.5 && Number($("gravity").value) === 1.62, "Physical settings did not apply");
+    $("pendulum-compare").click(); assert($("pendulum-separation").textContent === "—", "Comparison did not disable");
+    $("pendulum-trails").click(); click('[data-pendulum-view="phase"]');
+    assert($("pendulum-caption").textContent.includes("Angles wrap"), "Phase portrait did not open");
+  });
+  await test("Switching experiments pauses playback", async () => {
+    $("pendulum-play").click(); await wait(80); $("logistic-tab").click(); await wait(80); $("pendulum-tab").click();
+    const time = $("pendulum-time").textContent; await wait(80);
+    assert($("pendulum-time").textContent === time && $("pendulum-state").textContent.includes("PAUSED"), "Hidden experiment kept running");
+  });
+  await test("Field-note actions open the matching experiments", async () => {
+    click('[data-note-action="fork"]'); await wait(40);
+    assert(!$("logistic-panel").hidden && $("growth").value === "3.2", "Period-2 note action failed");
+    click('[data-note-action="sensitivity"]'); await wait(40);
+    assert(!$("pendulum-panel").hidden && $("pendulum-compare").checked && $("angle1").value === "120", "Sensitivity note action failed");
+    click('[data-note-action="phase"]'); await wait(40);
+    assert(doc.querySelector('[data-pendulum-view="phase"]').getAttribute("aria-selected") === "true" && $("angle1").value === "15", "Phase note action failed");
+    if ($("pendulum-state").textContent === "SIMULATION RUNNING") $("pendulum-play").click();
+  });
+  await test("PNG export creates a downloadable plot", async () => {
+    const originalClick = win.HTMLAnchorElement.prototype.click; let download;
+    win.HTMLAnchorElement.prototype.click = function() { download = { name: this.download, href: this.href }; };
+    try { click('[data-canvas="pendulum-canvas"]'); await wait(100); assert(download && download.name.endsWith(".png") && download.href.startsWith("blob:"), "PNG download not created"); }
+    finally { win.HTMLAnchorElement.prototype.click = originalClick; }
+  });
+  await test("Mobile layout fits a 360px viewport in both experiments", async () => {
+    frame.style.width = "360px"; await wait(100);
+    for (const name of ["logistic", "pendulum"]) {
+      $(`${name}-tab`).click(); await wait(80);
+      assert(doc.documentElement.scrollWidth <= win.innerWidth + 1, `${name} overflows: ${doc.documentElement.scrollWidth} > ${win.innerWidth}`);
+      const canvas = $(`${name}-canvas`), rect = canvas.getBoundingClientRect(); assert(rect.width > 200 && rect.width <= win.innerWidth, `${name} canvas has wrong size`);
+    }
+  });
+  await test("Reset restores logistic defaults", () => {
+    $("logistic-tab").click(); $("logistic-reset").click();
+    assert($("growth").value === "3.7" && $("initial").value === "0.2" && $("iterations").value === "120" && !$("logistic-compare").checked, "Defaults were not restored");
+    assert(doc.querySelector('[data-logistic-view="bifurcation"]').getAttribute("aria-selected") === "true", "Reset did not restore bifurcation view");
+  });
+  await test("No JavaScript errors during interaction", () => assert(errors.length === 0, errors.join("; ")));
+  document.getElementById("status").textContent = `${failed ? "FAIL" : "PASS"}: ${passed} passed, ${failed} failed.`;
+  document.body.dataset.result = failed ? "FAIL" : "PASS";
+  document.body.dataset.passed = passed;
+  document.body.dataset.failed = failed;
+});
+</script>
+</html>
